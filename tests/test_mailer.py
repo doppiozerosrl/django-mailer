@@ -89,6 +89,27 @@ class SendingTest(TestCase):
             self.assertEqual(len(mail.outbox), 1)
             self.assertEqual(Message.objects.count(), 0)
 
+    def test_fallback_backend(self):
+        with self.settings(
+            MAILER_EMAIL_BACKEND="tests.FailingMailerEmailBackend", MAILER_FALLBACK_EMAIL_BACKEND="tests.TestMailerEmailBackend",):
+            mailer.send_mail("Subject ☺", "Body", "sender1@example.com", ["recipient@example.com"])
+            self.assertEqual(Message.objects.count(), 1)
+            self.assertEqual(len(TestMailerEmailBackend.outbox), 0)
+            engine.send_all()
+            self.assertEqual(len(TestMailerEmailBackend.outbox), 1)
+            self.assertEqual(Message.objects.count(), 0)
+            self.assertEqual(MessageLog.objects.count(), 1)
+
+    def test_failing_fallback_backend(self):
+        with self.settings(
+            MAILER_EMAIL_BACKEND="tests.FailingMailerEmailBackend", MAILER_FALLBACK_EMAIL_BACKEND="tests.FailingMailerEmailBackend",):
+            mailer.send_mail("Subject", "Body", "sender2@example.com", ["recipient@example.com"])
+            engine.send_all()
+            self.assertEqual(Message.objects.count(), 1)
+            self.assertEqual(Message.objects.deferred().count(), 1)
+            self.assertEqual(MessageLog.objects.count(), 1)
+
+
     def test_purge_old_entries(self):
 
         def send_mail(success):

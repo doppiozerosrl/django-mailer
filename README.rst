@@ -77,6 +77,22 @@ To remove successful log entries older than a week, add this to a cron job file 
 
 Use the `-r failure` option to remove only failed log entries instead, or `-r all` to remove them all.
 
+Fallback support
+----------------
+
+To enable a fallback email backend to be used in case an email fails to be sent add in ``settings.py``:
+::
+    MAILER_FALLBACK_EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_FALLBACK_CONFIG = {
+        'host': 'smtp.host',
+        'username': 'username',
+        'password': 'password',
+        'use_tls': True,
+    }
+
+The dictionary ``EMAIL_FALLBACK_CONFIG`` is then passed as keyword arguments to the backend connection 
+function.
+
 Documentation and support
 -------------------------
 

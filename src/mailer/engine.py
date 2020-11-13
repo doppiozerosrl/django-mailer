@@ -193,6 +193,12 @@ def send_all():
         "django.core.mail.backends.smtp.EmailBackend"
     )
 
+    mailer_fallback_email_backend = getattr(
+        settings,
+        "MAILER_FALLBACK_EMAIL_BACKEND",
+        None
+    )
+
     # allows disabling file locking. The default is True
     use_file_lock = getattr(settings, "MAILER_USE_FILE_LOCK", True)
 
@@ -202,6 +208,7 @@ def send_all():
     )
 
     _require_no_backend_loop(mailer_email_backend)
+    _require_no_backend_loop(mailer_fallback_email_backend)
 
     if use_file_lock:
         acquired, lock = acquire_lock()
@@ -210,7 +217,7 @@ def send_all():
 
     start_time = time.time()
 
-    counts = {'deferred': 0, 'sent': 0}
+    counts = {'deferred': 0, 'sent': 0, 'fallback': 0}
 
     try:
         connection = None
@@ -242,7 +249,24 @@ def send_all():
                     message.delete()
 
                 except Exception as err:
-                    connection, action_taken = error_handler(connection, message, err)
+                    action_taken = None
+                    # If a fallback server is defined, then retry sending the mail using this server
+                    if mailer_fallback_email_backend is not None:
+                        fallback = getattr(settings, "EMAIL_FALLBACK_CONFIG", {})
+                        try:
+                            logger.info("WARNING: main server failed, retrying using fallback")
+                            email.connection = get_connection(backend=mailer_fallback_email_backend, **fallback)
+                            email.send()
+                            email.connection = None
+                            message.email = email  # For the sake of MessageLog
+                            MessageLog.objects.log(message, RESULT_SUCCESS)
+                            counts['sent'] += 1
+                            action_taken = 'fallback'
+                            message.delete()
+                        except Exception as err:
+                            connection, action_taken = error_handler(connection, message, err)
+                    else:
+                        connection, action_taken = error_handler(connection, message, err)
                     counts[action_taken] += 1
 
             # Check if we reached the limits for the current run
@@ -256,7 +280,7 @@ def send_all():
             release_lock(lock)
 
     logger.info("")
-    logger.info("%s sent; %s deferred;" % (counts['sent'], counts['deferred']))
+    logger.info("%s sent; %s sent using fallback; %s deferred;" % (counts['sent'], counts['fallback'], counts['deferred']))
     logger.info("done in %.2f seconds" % (time.time() - start_time))
 
 
